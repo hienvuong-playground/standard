@@ -22,7 +22,16 @@ Rejected for the script: the GitHub Actions PR setting (Terraform has resources 
 3. **GitHub manual pieces.**
    - Classic PAT with `admin:org` and `repo`.
    - GitHub App + PEM (permissions and installation in 0003). Put its App ID and installation ID in `infra/k8s/terraform/providers.tf`.
-4. **`infra/init/secrets.auto.tfvars`** with `github_token`, `github_app_pem` and `cloudflare_api_token`.
+4. **`infra/init/secrets.auto.tfvars`** with `github_token`, `github_app_pem` and `cloudflare_api_token`. The PEM is multi-line, so use a heredoc:
+   ```
+   github_token         = "..."
+   cloudflare_api_token = "..."
+   github_app_pem       = <<EOT
+   -----BEGIN RSA PRIVATE KEY-----
+   ...
+   -----END RSA PRIVATE KEY-----
+   EOT
+   ```
 5. **`az login`** to the playground subscription, then **run `infra/init/bootstrap.sh`**.
 6. **Run init** from `infra/init/`: `terraform init -upgrade -reconfigure -backend-config=../terraform-backend/init.tfbackend`, `terraform plan -out tfplan`, `terraform apply tfplan`.
 7. **Push to `infra` main** with a change under `cloud/` or `k8s/terraform/`. CI applies `cloud`, then `k8s/terraform`. The first cloud apply may hit 403 on the blob upload while the role assignment propagates; rerun (0006).
