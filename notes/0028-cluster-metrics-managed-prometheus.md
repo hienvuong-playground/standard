@@ -74,6 +74,14 @@ Rejected:
   - Every panel query of the seven built-ins was run against AMW with real variable values. All 22 panels of Cluster return data, and every empty panel is in the list above.
   - A local plan of the `grafana` stack showed 7 to add and 0 to change.
 
+## Not done yet: alerts
+
+No alert rules exist yet. The plan is to alert in Grafana. Use Microsoft's recommended Kubernetes alerts as the list of *what* to alert on (https://learn.microsoft.com/en-us/azure/azure-monitor/containers/kubernetes-metric-alerts):
+
+- Prometheus rules "organized by pod, cluster, and node level": 11 cluster, 2 node and 16 pod rules, each with a description. There are also 2 platform metric rules.
+- The PromQL for each rule is in the page's ARM template (https://aka.ms/azureprometheus-recommendedmetricalerts). It can be reused in Grafana alert rules against the AMW datasource.
+- The page's deployment parts (portal, ARM, Bicep, action group) don't apply. They create alert rules that Azure Monitor evaluates and that notify through an action group. Grafana alert rules notify through Grafana contact points instead.
+
 ## References
 
 - https://learn.microsoft.com/en-us/azure/azure-monitor/metrics/prometheus-metrics-overview
@@ -84,3 +92,4 @@ Rejected:
 - https://learn.microsoft.com/en-us/azure/azure-monitor/data-collection/data-collection-rule-overview
 - https://learn.microsoft.com/en-us/azure/azure-monitor/data-collection/data-collection-endpoint-overview
 - https://learn.microsoft.com/en-us/azure/aks/container-network-observability-metrics
+- https://learn.microsoft.com/en-us/azure/azure-monitor/containers/kubernetes-metric-alerts
