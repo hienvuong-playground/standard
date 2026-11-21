@@ -21,7 +21,7 @@ Rejected: `Contributor`. Grafana only reads, and write access adds nothing.
 
 - Standard bills per instance around the clock. Unlike AKS and Postgres (0019), AMG can't be stopped at night.
 - The URL is AMG's own `*.grafana.azure.com` endpoint (shown on the resource in the portal), not `grafana.<zone>` through Cloudflare like the self-hosted one.
-- The endpoint isn't a Terraform output yet. Add one to `infra/cloud/output.tf` once another stack (e.g. the Grafana Terraform provider) needs it.
+- The endpoint is the `cloud` output `managed_grafana_endpoint`, read by the `grafana` stack (0026).
 - Terraform resource names are prefixed `managed_grafana_`, so they don't get mixed up with the self-hosted `grafana_*` ones in `infra/cloud/grafana-auth.tf`.
 - Verified: the CI apply succeeded, members of the admin group can sign in, and both the Azure Monitor and the Prometheus datasources return data (0023, 0024).
 

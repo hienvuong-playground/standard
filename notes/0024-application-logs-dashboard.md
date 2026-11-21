@@ -5,7 +5,7 @@
 Logs reach Log Analytics over OTLP (DCR stream `Microsoft-OTel-Logs`, `infra/cloud/monitor.tf`) and land in the `OTelLogs` table. There is no Container Insights, so `ContainerLogV2` is empty. The new dashboard keeps the layout of AMG's built-in "Azure / Insights / Containers / ContainerLogV2 Analytics Tier" and rewires its queries:
 
 - Title "Application Logs", uid `application-logs`, folder Observability (0025).
-- Changed through the Grafana HTTP API. Not in Terraform yet.
+- First made through the Grafana HTTP API, now in Terraform: `infra/grafana/dashboards/application-logs.json` (0026).
 
 ## Decision
 

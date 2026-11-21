@@ -27,8 +27,8 @@ Rejected:
 - **Preferences are resolved user > team > org.** Anyone who sets a personal home won't see this page.
 - **In a dashboard-list panel, `folderUID: ""` means "General folder only", not "any folder".** The lists stayed empty until the key was removed.
 - **Org preferences have no history.** Dashboards do (Settings → Versions). Before this change, no home dashboard was set, so Grafana showed its built-in welcome page.
-- **Team members still need `Grafana Viewer` on AMG.** That Azure role assignment isn't set up yet.
-- **Everything here was made by hand through the Grafana API:** the folder, the three dashboards and the org preference. The next step is Terraform; the Grafana provider covers folders, dashboards and org preferences.
+- **Team members need `Grafana Viewer` on AMG.** The Dev group has it (0026).
+- **Everything here was first made by hand through the Grafana API.** The folder, the three dashboards and the org preference are now in Terraform (`infra/grafana/`, 0026).
 
 ## References
 

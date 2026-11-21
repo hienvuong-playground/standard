@@ -4,8 +4,8 @@
 
 AMG (0021) ships "Azure / Insights / Applications / OTel / HTTP Cumulative". I compared it with the self-hosted Prometheus, which receives the same metrics through remote-write. Most formulas are right, but several panels show wrong numbers. Built-in dashboards are provisioned by Azure, so they can't be saved in place and Azure overwrites them. The fixes therefore live in a copy:
 
-- Title "Application Metrics", uid `service-http`, folder Observability (0025).
-- Changed through the Grafana HTTP API. Not in Terraform yet.
+- Title "Application Metrics", uid `application-metrics`, folder Observability (0025).
+- First made through the Grafana HTTP API, now in Terraform: `infra/grafana/dashboards/application-metrics.json` (0026).
 
 ## Why the numbers were off
 
