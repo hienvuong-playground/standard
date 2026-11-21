@@ -32,6 +32,14 @@ Not managed: the datasources. Azure creates both (the AMW integration and `azure
 
 **`Grafana Viewer` for the Dev group** (`Hien Test Group Dev`), in `infra/cloud/managed-grafana.tf`. The self-hosted Grafana gives the same group Editor. Here Viewer is enough, because dashboard edits made in the UI would be overwritten anyway.
 
+## How the CI gets a Grafana token
+
+The general mechanism (sign-in vs access token, audiences, token vs role) is in 0027. In short: `azure/login` only gives `az` a session, and the Grafana provider can't turn that into a token. The workflow does it:
+
+1. `az account get-access-token --resource ce34e7e5-…` returns a token with the AMG audience.
+2. `::add-mask::` hides it in the logs.
+3. `$GITHUB_ENV` carries it to later steps as `GRAFANA_AUTH`, because shell variables don't survive between steps.
+
 ## Consequences
 
 - **Change a dashboard in the UI, export its JSON into `infra/grafana/dashboards/`, commit.** Edits made only in the UI are lost on the next apply.
