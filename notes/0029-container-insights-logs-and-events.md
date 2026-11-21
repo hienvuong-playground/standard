@@ -46,7 +46,17 @@ Not done yet:
 
 - Control plane logs (diagnostic settings). If added, use `kube-audit-admin`, not `kube-audit` (cost).
 - The Basic logs plan for `ContainerLogV2`.
-- A Grafana dashboard for these tables, and links from the infrastructure dashboards.
+- A dashboard for `KubeEvents` and `KubePodInventory`. AMG has no built-in for them.
+
+**Dashboard "Infrastructure Logs"** (uid `infrastructure-logs`, `infra/grafana/dashboards/infrastructure-logs.json`). A copy of the built-in "Azure / Insights / Containers / ContainerLogV2 Analytics Tier", because the table is on the Analytics plan. Built-ins can't be changed in place (0023). The `infrastructure-*.json` resource in `infra/grafana/dashboards.tf` picks it up, and the `infrastructure` tag puts it on Home (0025).
+
+Queries are unchanged except for the built-in bugs already found in 0024:
+
+- Log table: `$__timeFilter`, `LogLevel in~ ($sev)` instead of the `isempty($sev)` check, and `top 100 by TimeGenerated desc` instead of `take 100`.
+- "Log Volume by Computer" and "by Namespace": `$__timeFilter` added. They summed the whole retention.
+- Volume panels: unit `decbytes`, since `_BilledSize` is bytes.
+- Level links: `sub`, `rg`, `res`, `ns` instead of variable names from another dashboard, and TOTAL sets `var-sev=$__all`.
+- The 18 Explore links were removed.
 
 ## Consequences
 
@@ -66,6 +76,7 @@ Not done yet:
 - **Verified:**
   - A local `terraform plan` showed the cluster updated in place (`oms_agent` added) and the DCR and DCRA created.
   - The CI apply succeeded. `ama-logs` and `ama-logs-rs` are running, the ConfigMap is applied, and the new backend pod has the annotation.
+  - All 18 queries of Infrastructure Logs run against the workspace with real variable values (1 h). Log Volume (7,005,880 bytes) equals the sum by node. The table is newest first.
   - Data arrives in all three tables. In the 24 h to 2026-11-21 17:00 UTC there were 124,244 `ContainerLogV2` rows, 34,542 `KubePodInventory` rows (from 11:28 UTC) and 71 `KubeEvents` rows (from 11:22 UTC).
 
 ## References
