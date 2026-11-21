@@ -21,7 +21,7 @@ Nothing sent cluster metrics to the Azure Monitor workspace (AMW). It held only 
 
 ## Decision
 
-**Port Microsoft's `AddonTerraformTemplate` instead of writing our own.** The portal, CLI and ARM onboarding create these resources for you. Terraform doesn't. The Learn page's Terraform tab only points to this template.
+**Port Microsoft's `AddonTerraformTemplate` instead of writing our own.** The portal, CLI and ARM onboarding create these resources for you. Terraform doesn't. The Learn page's Terraform tab sends you to this template: "Download all files under AddonTerraformTemplate." It also requires that "The Azure Monitor workspace and Azure Managed Grafana workspace must already be created", which is the case here (0021). (https://learn.microsoft.com/en-us/azure/azure-monitor/containers/kubernetes-monitoring-enable?tabs=terraform#enable-prometheus-metrics-on-an-aks-cluster)
 
 Copied:
 
