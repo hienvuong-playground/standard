@@ -13,7 +13,7 @@ When team members open AMG (0021), they should land on the team dashboards (0023
   - `otel` was tried first and dropped, because the built-in "Azure Functions Health" carries it too.
 - **Names:** "Application Metrics", "Application Logs", and later "Infrastructure …".
 - **Dashboard `Home`** (uid `home`, General folder):
-  - Two dashboard-list panels: "Application" (tag `application`) and "Infrastructure" (tag `infrastructure`, empty for now).
+  - Two dashboard-list panels: "Application" (tag `application`) and "Infrastructure" (tag `infrastructure`, the Kubernetes dashboards from 0028).
   - Tagging a new dashboard is enough for it to appear.
   - Set as the org home in Administration → General → Default preferences → Home Dashboard (API: `PATCH /api/org/preferences`).
 
