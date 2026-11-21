@@ -1,4 +1,4 @@
-# 0030 – Keep health checks out of logs and traces
+# 0030 – Keep health checks out of logs, traces and metrics
 
 ## Context
 
@@ -6,13 +6,14 @@ Logs, traces and metrics in AMG were mostly kubelet probes. The backend's readin
 
 - Logs: 8,437 of 9,561 `OTelLogs` rows (~88%) were probe requests. They were already logged at `debug`, but `LOG_LEVEL=trace` still let them through.
 - Traces: 877 of 1,013 sampled traces (~87%) were probes. Each `/readyz` trace has about 10 spans (middleware, `pg-pool.connect`, `pg.query`), and the 10% baseline doesn't look at the route.
-- Metrics: about 8,430 of 9,100 requests in Prometheus.
+- Metrics: 8,156 of about 8,744 requests in AMW (~93%), so every request total, rate and average on the Application Metrics dashboard (0023) was mostly probes. The cost was negligible: the probes make 4 of the 13 `http.server.duration` series, and each series sends one sample per 30 s export whatever the request count. That's about 8 samples/min against 23,779/min for the whole workspace (`EventsPerMinuteIngested`), ~0.03%.
 
 ## Where to filter
 
 The OTel blueprint says to process telemetry "as close as possible to the application layer". The Collector is "a fallback measure on applications that could not apply these settings at the SDK level".
 
 - **Logs, in the app.** pino-http's `customLogLevel` returns `silent` for the probe routes (`backend/src/app.js`), and pino-http then skips the "request completed" line. The 5xx and 4xx checks come first, so a failing probe is still logged as `error`/`warn`.
+- **Metrics, in the Collector.** Same reason as traces for the hook. SDK Views don't help either: they select instruments by name, type, unit or meter, and `attribute_keys` is "an allow-list of attribute keys", so they can't drop datapoints by attribute value.
 - **Traces, in the Collector.** The SDK can't do it while the Operator injects the instrumentation. The injected `autoinstrumentation.js` calls `getNodeAutoInstrumentations()` with no options. `ignoreIncomingRequestHook` is a function, and functions are "in-code only", with no env var or config file. The only other way is a custom auto-instrumentation image. Auto-inject stays, so the Collector is the place.
 
 ## Decision
@@ -46,23 +47,34 @@ Why failed probes are kept: the last 30 days had 40 `/readyz` 5xx traces. Each o
 - The `/readyz` handler swallows the exception, so the log line only says 503.
 - `KubeEvents` (0029) records that the probe failed, but not why. An `Unhealthy` event says `Readiness probe failed: …` with the HTTP result, nothing from the DB.
 
+Metrics: `filter/drop-health` in the `metrics` pipeline of `infra/k8s/gitops/infrastructure/observability/otel/config/otel-collector.yaml`. It drops datapoints whose `http.route` is `/livez` or `/readyz` and whose `http.status_code` is below 400.
+
+- Same cut as logs: failed probes stay, so `/readyz` 503 shows in the failure panels when the DB is down.
+- `http.status_code` is an int on the metric (copied from the span attribute, `instrumentation-http` `utils.js`), so `< 400` compares numbers.
+- The filter processor can drop datapoints, and "If all datapoints for a metric are dropped, the metric will also be dropped". Its orphaned-telemetry warning is about spans only.
+- None of the three examples above covers metrics (the cookbook recipe says "Signals: traces"). No source says where to drop probe metrics, so this is a judgement.
+
 Rejected:
 
 - KubeCon's `drop-health` as written. It matches the route only, so failed probes are dropped too.
 - The cookbook's way of keeping failures, which drops only when the HTTP status is 200 (`numeric_attribute`, min = max = 200). It looks only at the server span's HTTP status. A 200 probe with a failed child span would still be dropped. `not` + `status_code` keeps any trace that `keep-errors` would keep.
 - The cookbook's extra 1% of successful probes. It adds a sub-policy for data that isn't looked at.
-- `filter` processor. It drops single spans and warns that "Dropping a span may lead to orphaned spans if the dropped span is a parent". A probe trace has a parent span with children.
+- Excluding probes in the dashboard queries (`"http.route"!~"/livez|/readyz"`). It keeps the data, but it's 36 selectors in `application-metrics.json`, and the built-in AMG dashboards, Explore and any new query would still show probes.
+- `filter` processor for traces. It drops single spans and warns that "Dropping a span may lead to orphaned spans if the dropped span is a parent". A probe trace has a parent span with children.
 
 ## Consequences
 
 - Successful, fast probes leave no trace and no log line. Failed probes keep both. Slow probes keep the trace.
 - A probe that fails with 4xx has span status `UNSET`, so it would be dropped. The probes here only return 200 or 503.
 - `keep-slow` keeps every `/api/slow` call (1–3 s delay) that runs over 2 s.
-- Metrics aren't filtered yet. The probe routes still show up in the Application Metrics dashboard (0023).
+- Metrics lose the latency of successful probes. That was the only metric of DB connect time when there's no real traffic. Slow probes still keep their trace.
+- `db.client.operation.duration` still includes the probes' queries (~89% of `select`s in 24 h). It has no `http.route`, so the filter can't tell them apart. No dashboard uses it yet.
+- The filter matches old HTTP semconv keys. After a switch to stable semconv it stops matching and probes come back, nothing is lost.
 - Checked: the `tail_sampling` block passes `otelcol-contrib validate` on 0.159.0. A bad key in it fails validation, so the check is real.
 - Verified after rollout (2026-11-21, new policies live from 16:16 UTC):
   - Logs: once the new backend image was up, the only probe row was the failed one below. The hour before, all 1,078 rows were probes.
   - Successful probes: 0 probe traces in the first minutes, against about one per minute with the old config. Test traffic still flowed: `/api/error` 3 of 3 kept, `/api/hello` sampled.
+  - Metrics (filter live at 16:50 UTC): the `/readyz` 200 and `/livez` 200 series stopped at 16:50:20. Other routes, `/readyz` 503 and `db.client.operation.duration` kept updating. The full collector config passes `validate`, and a local run on 0.159.0 dropped only the successful probe datapoints.
   - Postgres restart (`az postgres flexible-server restart`, 16:21:30–16:22:35) produced both kept cases:
     - Failed probe, 16:21:52: `GET /readyz` 503 with status `Error`. Its `pg.connect` span says `the database system is shutting down`. The log row is `error`, but it only says "failed with status code 503".
     - Slow probe, 16:22:02: `GET /readyz` 200, no error, 2,274 ms. `pg.connect` took 2,264 ms while the DB came back, and the query 9 ms. Only the trace shows that.
@@ -80,5 +92,7 @@ Rejected:
 - https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.159.0/processor/tailsamplingprocessor/internal/sampling/not.go
 - https://oneuptime.com/blog/post/2026-08-25-drop-health-check-traces-safely/view
 - https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.159.0/processor/filterprocessor/README.md#warnings
+- https://opentelemetry.io/docs/specs/otel/metrics/sdk/#view
+- https://azure.microsoft.com/pricing/details/monitor/
 - https://github.com/pavolloffay/kubecon-eu-2026-opentelemetry-observability-on-budget/blob/main/06-tail-based-sampling.md
 - https://github.com/jpkrohling/otelcol-cookbook/tree/main/starters/remove-health-checks
