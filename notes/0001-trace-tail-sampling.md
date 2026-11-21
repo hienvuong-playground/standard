@@ -2,7 +2,7 @@
 
 Date: 2026-10-22
 
-Update: tail sampling moved to a separate collector tier, see [0002](0002-collector-two-tier-tail-sampling.md).
+Update: tail sampling moved to a separate collector tier, see [0002](0002-collector-two-tier-tail-sampling.md). Policies renamed, plus keep-slow and drop-health, see [0030](0030-health-check-noise.md).
 
 ## Context
 
