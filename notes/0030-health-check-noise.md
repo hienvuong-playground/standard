@@ -60,7 +60,12 @@ Rejected:
 - `keep-slow` keeps every `/api/slow` call (1–3 s delay) that runs over 2 s.
 - Metrics aren't filtered yet. The probe routes still show up in the Application Metrics dashboard (0023).
 - Checked: the `tail_sampling` block passes `otelcol-contrib validate` on 0.159.0. A bad key in it fails validation, so the check is real.
-- After rollout, expect `GET /livez` / `GET /readyz` spans in `OTelSpans` only for failed or slow probes, and no new 2xx probe rows in `OTelLogs`.
+- Verified after rollout (2026-11-21, new policies live from 16:16 UTC):
+  - Logs: once the new backend image was up, the only probe row was the failed one below. The hour before, all 1,078 rows were probes.
+  - Successful probes: 0 probe traces in the first minutes, against about one per minute with the old config. Test traffic still flowed: `/api/error` 3 of 3 kept, `/api/hello` sampled.
+  - Postgres restart (`az postgres flexible-server restart`, 16:21:30–16:22:35) produced both kept cases:
+    - Failed probe, 16:21:52: `GET /readyz` 503 with status `Error`. Its `pg.connect` span says `the database system is shutting down`. The log row is `error`, but it only says "failed with status code 503".
+    - Slow probe, 16:22:02: `GET /readyz` 200, no error, 2,274 ms. `pg.connect` took 2,264 ms while the DB came back, and the query 9 ms. Only the trace shows that.
 
 ## References
 
