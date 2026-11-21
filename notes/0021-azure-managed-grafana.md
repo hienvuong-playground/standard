@@ -23,7 +23,7 @@ Rejected: `Contributor`. Grafana only reads, and write access adds nothing.
 - The URL is AMG's own `*.grafana.azure.com` endpoint (shown on the resource in the portal), not `grafana.<zone>` through Cloudflare like the self-hosted one.
 - The endpoint isn't a Terraform output yet. Add one to `infra/cloud/output.tf` once another stack (e.g. the Grafana Terraform provider) needs it.
 - Terraform resource names are prefixed `managed_grafana_`, so they don't get mixed up with the self-hosted `grafana_*` ones in `infra/cloud/grafana-auth.tf`.
-- Verified: the CI apply succeeded. Still to check: signing in as a member of the admin group, and that the Azure Monitor and Prometheus datasources return data.
+- Verified: the CI apply succeeded, members of the admin group can sign in, and both the Azure Monitor and the Prometheus datasources return data (0023, 0024).
 
 ## References
 
