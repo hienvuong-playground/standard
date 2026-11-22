@@ -40,6 +40,7 @@ Everything is in `infra/cloud/teams-alerts.tf`.
 - The JSON shape comes from Microsoft's own sources, because the schema reference doesn't document it:
   - `BatchTriggerInputs` and `SendToBatchActionInputs` in the LogicAppsUX designer source.
   - A Consumption workflow in Azure-Sentinel (Group-IB playbooks) that uses both, with no integration account. Items are read as `triggerBody()['items']` → `item()['content']`.
+- The batch configuration name is `TeamsAlerts`. Azure rejected `teams-alerts` on apply: "The name can only be a letter or digit." The Batch doc doesn't mention this.
 - One card per distinct `alertname|cluster` in the released items, so it works whether a release holds one partition or several.
 
 **The card follows Alertmanager's msteamsv2 notifier:**
@@ -78,7 +79,7 @@ Everything is in `infra/cloud/teams-alerts.tf`.
   - A card for 50 alerts is roughly 700 actions, about $0.02.
 - **Not verified yet** (check in run history on the first cluster start after deploy):
   - Whether one release holds one partition or several.
-  - Whether the trigger runs (and bills) on empty minutes.
+  - Whether empty minutes are billed. The trigger history shows one check per minute with `Fired: False` and no run while the batch is empty (14:28 and 14:29 UTC, 2026-11-22).
   - That `xpath()` returns plain strings for `name()` and `string()`.
   - That `union()` of the keys with itself removes duplicates within one array (the doc example only shows duplicates across two arrays).
   - That an If with a false condition reports Succeeded.
