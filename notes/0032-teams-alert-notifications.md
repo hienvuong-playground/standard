@@ -73,7 +73,7 @@ In a shared vault, the Logic App would either read the backend's secrets (vault 
 - **Changing the URL:** update tfvars, run init, then bump `value_wo_version` in `teams-alerts.tf`. "Terraform has no way of knowing if a write-only argument value has changed", so without the bump CI does nothing.
 - **No grouping in this path.** Each alert becomes its own card. Action groups don't group, and Grafana's notification policies aren't in this path (0031). Prometheus alerts are now grouped by a second workflow (0034); other alert types still get one card each.
   - Seen for real after a node restart (0033): 63 alerts gave 63 Fired and 63 Resolved cards, each batch sent by the Logic App within ~4 s.
-  - The Logic App sent nothing after 10:28:50, yet cards kept arriving until ~10:45.
+  - The Logic App sent nothing after 17:28:50, yet cards kept arriving until ~17:45.
 - **Teams posts asynchronously, at its own pace.**
   - The webhook answers `202 Accepted` with `x-ms-workflow-run-id` and `x-ms-workflow-system-id: /locations/southeastasia/…`. The Teams side is itself a workflow (Power Automate): it queues the request and posts the card later.
   - The Teams connector throttles "Post an Adaptive Card as Flow bot, and any other Flow bot operations" to **25 calls per 300 seconds**, about 5 cards a minute. A batch of 63 then takes ~13 minutes to drain, which matches what was seen.
@@ -83,10 +83,10 @@ In a shared vault, the Logic App would either read the backend's secrets (vault 
 - **Verified** (2026-11-22):
   - CI run 45003455703 created the resources: `Apply complete! Resources: 14 added, 0 changed, 0 destroyed.` (with the 0033 rules).
   - `az monitor action-group test-notifications create … --alert-type metricstaticthreshold` returned `LogicApp: Succeeded`.
-  - Run at 08:41:18 UTC: `get-webhook-url` Succeeded (OK), `post-to-teams` Succeeded (202 Accepted). So the identity can read the vault, and a GET without a version returns the current secret.
+  - Run at 15:41:18: `get-webhook-url` Succeeded (OK), `post-to-teams` Succeeded (202 Accepted). So the identity can read the vault, and a GET without a version returns the current secret.
   - Run history: no link to `get-webhook-url` outputs and none to `post-to-teams` inputs. The remaining links don't contain the webhook host.
   - The test payload had all declared `string` fields as strings, no `resolvedDateTime` (absent, not `null`), and an extra `configurationItems`. Its `alertContext` had `properties`, `conditionType`, `condition` and no `annotations`.
-- **Verified with a real Prometheus alert** (`KubePodFailedState` from a failing Job, 0033): the run at 09:44:48 UTC succeeded and the card showed in the channel. The payload:
+- **Verified with a real Prometheus alert** (`KubePodFailedState` from a failing Job, 0033): the run at 16:44:48 succeeded and the card showed in the channel. The payload:
   - `essentials.alertRule` is `<rule group>/<alert>`, e.g. `KubernetesAlert-RecommendedMetricAlertsaks-playground-Pod-level/KubePodFailedState`.
   - `monitoringService` is `Prometheus` and `signalType` is `Metric`. There's no `resolvedDateTime` while Fired.
   - `alertContext` has `interval`, `expression`, `expressionValue`, `for`, `labels`, `annotations`, `ruleGroup`, `monitoringWorkspace`, `grafanaExploreUrl` and `conditionType`.

@@ -31,7 +31,7 @@ Everything is in `infra/cloud/teams-alerts.tf`.
 
 - Action `is-prometheus` checks `essentials.monitoringService == 'Prometheus'`. Azure sets this field per rule type. Values seen: `Prometheus`, `Platform` (metric alert), `ServiceHealth`.
 - If true: `SendToBatch` sends the alert's `data` to the batch workflow, then `Terminate` (Succeeded) ends the run.
-  - No partition name. It's optional (`partitionName?` in LogicAppsUX), and the receiver groups by alert content anyway. The first deploy used `alertname|cluster` and every send failed: "InvalidBatchPartitionName… The name can only be a letter, digit, or any of the following symbols: '-', '_', '.', '(', ')'". Those alerts fell back to single cards (2026-11-22, 14:47 UTC).
+  - No partition name. It's optional (`partitionName?` in LogicAppsUX), and the receiver groups by alert content anyway. The first deploy used `alertname|cluster` and every send failed: "InvalidBatchPartitionName… The name can only be a letter, digit, or any of the following symbols: '-', '_', '.', '(', ')'". Those alerts fell back to single cards (2026-11-22, 21:47).
 - Otherwise, the single-card path runs unchanged (0032). It runs after any status of `is-prometheus`, because the If action's status for a false condition isn't documented. A failed `send-to-batch` therefore also falls back to a single card.
 - Why only Prometheus: the template is built on labels. Metric alerts and Service Health alerts have no `alertContext.labels`.
 
@@ -66,6 +66,17 @@ Everything is in `infra/cloud/teams-alerts.tf`.
   - The wording of the line is ours, because the template has none.
 - **`#` headers stay**, as in the template, even though Teams Adaptive Cards don't support headers. They show as plain text.
 
+## How to test
+
+Replay real alerts instead of waiting for one to fire:
+
+1. List runs of `logic-playground-teams-alerts` and pick runs with real alerts. Each run's `properties.trigger.outputsLink.uri` holds the exact body the action group sent.
+2. Get the trigger URL with `POST …/triggers/alert/listCallbackUrl`. It's the same URL the action group calls.
+3. POST the bodies to it within one minute, so they land in one batch.
+4. Check both workflows in the portal (Overview → Runs history / Trigger history), action by action. `get-webhook-url` and `post-to-teams` show no inputs/outputs (`secureData`).
+
+This tests everything from the Logic App on, not the rule → action group part (0032). Cards go to the real channel.
+
 ## Consequences
 
 - **Other alert types** (resource metric alerts from AMBA, Service Health, log search alerts) still get one card each. Their `alertContext.condition.allOf[].dimensions` are name/value pairs like labels, so they can be added to the batch path if they ever burst.
@@ -78,7 +89,7 @@ Everything is in `infra/cloud/teams-alerts.tf`.
   - "Consumption Built-in Actions" in westeurope: first 4,000 free, then $0.000025 each (Azure Retail Prices API).
   - The trigger at one run per minute is at most ~43,200 runs a month, about $1, if empty minutes are billed.
   - A card for 50 alerts is roughly 700 actions, about $0.02.
-- **Verified** (2026-11-22) by re-posting the 76 real Fired payloads from 21:47 (Vietnam time) to the `alert` trigger's callback URL:
+- **Verified** (2026-11-22) by re-posting the 76 real Fired payloads from 21:47 to the `alert` trigger's callback URL:
   - All 76 sender runs went through `send-to-batch`. One batch run at 22:37:27 held all 76 items, so `union()` of the keys with itself left one group.
   - `xpath()` returned plain strings for `name()` and `string()`.
   - Title `[FIRING:76] KubePodContainerRestart aks-playground (warning)`. The text had 50 alerts and `… 26 alerts truncated`, 19,974 bytes. `post-to-teams` got `202 Accepted`.
