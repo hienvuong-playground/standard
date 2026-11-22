@@ -21,7 +21,7 @@ Alerts are evaluated in Azure Monitor (0031), and they need to reach people. The
 
 - **Title:** `<monitorCondition>: <alertRule>`, e.g. "Fired: KubePodCrashLooping".
 - **Description:** `coalesce(alertContext.annotations.description, essentials.description)`.
-  - Prometheus rules carry their text in annotations. The schema doc's Prometheus sample has `alertContext.annotations`, and our rules name the annotation `description`.
+  - Prometheus rules carry their text in annotations. The schema doc's Prometheus sample has `alertContext.annotations`, and our rules name the annotation `description`. A real payload showed Azure also copies it into `essentials.description` (see Consequences).
   - Other alert types have no `annotations`. The `?` operator then yields `null`, and `coalesce` ("Return the first non-null value") falls back to `essentials.description` ("The description, as defined in the alert rule").
   - An empty string doesn't fall back: "Empty strings… aren't null".
 - **Facts:** severity, fired, resolved, targets (`alertTargetIDs`).
@@ -78,10 +78,13 @@ In a shared vault, the Logic App would either read the backend's secrets (vault 
   - Run at 08:41:18 UTC: `get-webhook-url` Succeeded (OK), `post-to-teams` Succeeded (202 Accepted). So the identity can read the vault, and a GET without a version returns the current secret.
   - Run history: no link to `get-webhook-url` outputs and none to `post-to-teams` inputs. The remaining links don't contain the webhook host.
   - The test payload had all declared `string` fields as strings, no `resolvedDateTime` (absent, not `null`), and an extra `configurationItems`. Its `alertContext` had `properties`, `conditionType`, `condition` and no `annotations`.
-- **Not verified yet:**
-  - A real Prometheus payload: does `alertContext.annotations.description` arrive as in the doc sample?
-  - The card's look in the channel. The API only shows that Teams accepted it.
-  - Whether `apply tfplan` actually needs the ephemeral variable again. The docs don't say. CI passes it to both steps, so this can't be told from the run.
+- **Verified with a real Prometheus alert** (`KubePodFailedState` from a failing Job, 0033): the run at 09:44:48 UTC succeeded and the card showed in the channel. The payload:
+  - `essentials.alertRule` is `<rule group>/<alert>`, e.g. `KubernetesAlert-RecommendedMetricAlertsaks-playground-Pod-level/KubePodFailedState`.
+  - `monitoringService` is `Prometheus` and `signalType` is `Metric`. There's no `resolvedDateTime` while Fired.
+  - `alertContext` has `interval`, `expression`, `expressionValue`, `for`, `labels`, `annotations`, `ruleGroup`, `monitoringWorkspace`, `grafanaExploreUrl` and `conditionType`.
+  - `alertContext.annotations.description` is the rule's annotation. **`essentials.description` carries the same text**, so for Prometheus the `coalesce` fallback isn't needed. It's harmless.
+  - `alertContext.labels` holds the series labels (`namespace`, `controller`, …), which the card doesn't show yet.
+- **Not verified yet:** whether `apply tfplan` actually needs the ephemeral variable again. The docs don't say, and CI passes it to both steps, so the run can't tell.
 
 ## References
 

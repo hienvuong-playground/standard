@@ -35,10 +35,17 @@ Everything is in `infra/cloud/kubernetes-alerts.tf`, and every rule notifies thr
   - AMBA marks both `verified: false`.
   - They have no split by the `node` dimension, so they look at the cluster-wide value ("Aggregated average CPU utilization measured in percentage across the cluster"), not each node.
 - **Startup noise is possible.** 0029 saw seven containers crash when AKS started. Restart and crash-loop rules can catch that every morning. If it does, an alert processing rule with a recurring window is the fix (0031).
+- **Verified end to end (2026-11-22):**
+  - `kubectl create job alert-test --image=busybox:1.36 -- sh -c 'exit 1'` in a throwaway namespace `alert-test`. Its failed pods match `KubePodFailedState` (`for: PT5M`, the fastest rule).
+  - All the metrics these rules use are in the minimal ingestion profile's kube-state keep list (`kube_pod_status_phase`, `kube_pod_owner`, `kube_job_failed`, `kube_pod_container_status_waiting_reason`, …). `kube_job_status_failed` isn't kept, but no rule uses it.
+  - A range query on the AMW showed the expression true every minute from 09:25 UTC.
+  - Azure fired the alert at **09:44:47**, about 14 minutes after `for` had elapsed. Until then, Alerts API and Resource Graph showed no Prometheus alert at all. The docs read (rule groups, Prometheus alerts, troubleshooting) give no evaluation latency. So don't expect `for` + 1 minute, and don't judge a test before ~20 minutes.
+  - The card reached Teams (0032).
+- **Resource Health of rule groups isn't useful here.** All four groups (three alert, one recording) reported "Unavailable… due to an unknown reason" while recording rules were producing data and the alert fired. A Microsoft Q&A thread reports the same mismatch.
 - **Not checked:**
   - How metric alerts behave while AKS is stopped (no data).
   - The price of Prometheus rule groups.
-  - A real fired alert end to end. CI applied the rules (0032, run 45003455703), but nothing has fired yet.
+  - The Resolved notification (namespace deleted 09:46 UTC, `time_to_resolve: PT15M`).
 
 ## References
 
@@ -49,4 +56,7 @@ Everything is in `infra/cloud/kubernetes-alerts.tf`, and every rule notifies thr
 - https://github.com/Azure/azure-monitor-baseline-alerts/blob/main/services/ContainerService/managedClusters/alerts.yaml
 - https://learn.microsoft.com/en-us/azure/azure-monitor/reference/supported-metrics/microsoft-containerservice-managedclusters-metrics
 - https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
+- https://learn.microsoft.com/en-us/azure/azure-monitor/containers/prometheus-metrics-scrape-default
+- https://learn.microsoft.com/en-us/azure/azure-monitor/alerts/prometheus-alerts
+- https://learn.microsoft.com/en-us/answers/questions/5965141/prometheus-rule-group-resource-health-remains-unkn
 - https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/monitor_alert_prometheus_rule_group
