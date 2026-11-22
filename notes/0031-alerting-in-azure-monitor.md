@@ -42,7 +42,7 @@ Not invented here. One standard source per layer:
 
 ## Consequences
 
-- **We give up Grafana's notification features.** No native Slack or Teams (Teams goes through a Logic App, 0032), no grouping of several alerts into one notification, no Go templates for the message.
+- **We give up Grafana's notification features.** No native Slack or Teams (Teams goes through a Logic App, 0032), no grouping of several alerts into one notification (built for Prometheus alerts with Logic Apps Batch, 0034), no Go templates for the message.
 - **Limits.** Email: at most 100 per hour per address per region. SMS and voice: one every five minutes.
 - **The nightly AKS/Postgres stop (0019) may need an alert processing rule** with a recurring window. Prometheus rules don't fire while the cluster is stopped: an alert is only active when the expression "results in one or more vector elements", and a stopped cluster sends no samples. The risk is the start: 0029 saw seven containers crash when AKS started, which restart and crash-loop rules can catch. Platform metric alerts and Resource Health on stopped resources aren't checked yet (0033). Processing rules don't affect Service Health alerts.
 - **Not verified:** how Azure Monitor alerts behave in a regional outage (no reliability page found), and the price of Prometheus rule groups.

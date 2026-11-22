@@ -34,18 +34,38 @@ Everything is in `infra/cloud/kubernetes-alerts.tf`, and every rule notifies thr
 - **Platform rules:**
   - AMBA marks both `verified: false`.
   - They have no split by the `node` dimension, so they look at the cluster-wide value ("Aggregated average CPU utilization measured in percentage across the cluster"), not each node.
-- **Startup noise is possible.** 0029 saw seven containers crash when AKS started. Restart and crash-loop rules can catch that every morning. If it does, an alert processing rule with a recurring window is the fix (0031).
+- **A node restart floods the channel.** The startup noise 0029 hinted at, now seen.
+  - On 2026-11-22 the VMSS was deallocated 09:18–09:21 and started 09:22–09:23 (activity log). The node was `Rebooted`/`NodeReady` at 09:22:47.
+  - The cluster has one node, so 74 containers restarted at once (last terminated reason `Unknown` for 70).
+  - `KubePodContainerRestart` sums `increase(kube_pod_container_status_restarts_total[1h])` `by (namespace, controller, container, cluster)`, and each resulting series is its own alert. So the 74 restarts made **63 alerts**: 11 controllers have 2 replicas of the same container, which merge into one series. A range query of the expression returned 63 series.
+  - Result: 63 Fired cards (09:54) and 63 Resolved cards (10:28, when `increase(...[1h])` dropped to 0). Plus `KubePodFailedState` from the test, 64 alertIds in total.
+  - No duplicates: 126 runs read, one card per alertId and state, no retries of the POST.
+  - The same will happen after every cluster start (0019). A recurring processing rule doesn't fit, because the start time is manual. Fix: grouped cards (0034).
+- **Latency from restart to fired alert: ~32 minutes.**
+
+  | UTC | Step | Took |
+  |---|---|---|
+  | 09:22:47 | Containers restart | |
+  | 09:26 | Expression true (63 series, every minute after) | ~3 min (scrape and ingest) |
+  | 09:41 | `for: PT15M` satisfied | 15 min (rule setting) |
+  | **09:54:47** | Azure fires the alert (`firedDateTime`) | **~14 min, unexplained** |
+  | 09:54:48–51 | Action group → Logic App runs | 1–4 s |
+  | 09:54:49–52 | POST to Teams, `202 Accepted` | ~1 s |
+  | 09:54 → ~10:07 | Teams posts the cards one by one | 0 to ~13 min, depending on position (0032) |
+
+  - The ~14 min after `for` matched the Job test exactly: due ~09:31, fired 09:44:47. Both fired at second :47.
+  - None of the docs read (rule groups, Prometheus alerts, troubleshooting) mention evaluation latency. Not explained yet. A support case would be the next step.
 - **Verified end to end (2026-11-22):**
   - `kubectl create job alert-test --image=busybox:1.36 -- sh -c 'exit 1'` in a throwaway namespace `alert-test`. Its failed pods match `KubePodFailedState` (`for: PT5M`, the fastest rule).
   - All the metrics these rules use are in the minimal ingestion profile's kube-state keep list (`kube_pod_status_phase`, `kube_pod_owner`, `kube_job_failed`, `kube_pod_container_status_waiting_reason`, …). `kube_job_status_failed` isn't kept, but no rule uses it.
   - A range query on the AMW showed the expression true every minute from 09:25 UTC.
   - Azure fired the alert at **09:44:47**, about 14 minutes after `for` had elapsed. Until then, Alerts API and Resource Graph showed no Prometheus alert at all. The docs read (rule groups, Prometheus alerts, troubleshooting) give no evaluation latency. So don't expect `for` + 1 minute, and don't judge a test before ~20 minutes.
   - The card reached Teams (0032).
+  - The namespace was deleted at 09:46. The Resolved card was sent at 10:02:49.
 - **Resource Health of rule groups isn't useful here.** All four groups (three alert, one recording) reported "Unavailable… due to an unknown reason" while recording rules were producing data and the alert fired. A Microsoft Q&A thread reports the same mismatch.
 - **Not checked:**
   - How metric alerts behave while AKS is stopped (no data).
   - The price of Prometheus rule groups.
-  - The Resolved notification (namespace deleted 09:46 UTC, `time_to_resolve: PT15M`).
 
 ## References
 

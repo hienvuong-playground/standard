@@ -13,8 +13,9 @@ Alerts are evaluated in Azure Monitor (0031), and they need to reach people. The
    - The `schema` is the common alert schema, copied from the alerts-logic-apps page ("Paste the common alert schema into the Request Body JSON Schema field"). It only documents the payload and gives the portal designer its tokens ("The designer uses this schema to generate tokens"). azurerm requires it.
    - `alertContext` is declared empty because its content differs per alert type. The actions read fields with expressions, not designer tokens.
    - **Schema Validation stays off.** When on, a body that doesn't match the schema gets "HTTP 400 Bad Request" and the workflow doesn't run, so that alert never reaches Teams. The schema has no `required` fields, so validation would only catch wrong types (e.g. a `null` where `string` is declared). Which fields can be `null` isn't documented. The only caller is the action group, so there's nothing to filter.
-3. **Action `get-webhook-url`.** An HTTP GET to Key Vault (`/secrets/teams-alerts-webhook-url?api-version=2025-07-01`) with the Logic App's system-assigned identity (`authentication.type = ManagedServiceIdentity`, audience `https://vault.azure.net`). `secureData` hides its outputs in run history.
-4. **Action `post-to-teams`.** An HTTP POST of an Adaptive Card to the URL from step 3 (`@body('get-webhook-url')?['value']`). `secureData` hides its inputs (URL and card) in run history.
+3. **Action `is-prometheus`.** Prometheus alerts are handed to the batch workflow and the run ends there (0034). Everything below is the path for all other alert types.
+4. **Action `get-webhook-url`.** An HTTP GET to Key Vault (`/secrets/teams-alerts-webhook-url?api-version=2025-07-01`) with the Logic App's system-assigned identity (`authentication.type = ManagedServiceIdentity`, audience `https://vault.azure.net`). `secureData` hides its outputs in run history.
+5. **Action `post-to-teams`.** An HTTP POST of an Adaptive Card to the URL from step 3 (`@body('get-webhook-url')?['value']`). `secureData` hides its inputs (URL and card) in run history.
    - Both are `azurerm_logic_app_action_custom`, because `azurerm_logic_app_action_http` has no `runtimeConfiguration`.
 
 **The card.** The envelope (`type: message`, `attachments`, `contentType: application/vnd.microsoft.card.adaptive`, `AdaptiveCard` version 1.2) follows the example in the Teams incoming webhook doc. Content:
@@ -51,7 +52,7 @@ Rejected:
 2. Init writes the GitHub org secret `TEAMS_ALERTS_WEBHOOK_URL`, visible to `infra` only (`infra/init/main.tf`).
 3. CI passes it as `TF_VAR_teams_alerts_webhook_url` to Plan and Apply (`infra/.github/workflows/deploy.yml`). The variable is `ephemeral`, which omits it "from state and plan files". A plain sensitive variable is still stored in state. A validation rejects anything that isn't `https://`.
 4. Terraform writes it into Key Vault with `value_wo`, which is write-only and not persisted to state or plan.
-5. The Logic App reads it at runtime (steps 3–4 above).
+5. The Logic App reads it at runtime (steps 4–5 above).
 
 Why Key Vault and not only a `securestring` workflow parameter:
 
@@ -70,7 +71,14 @@ In a shared vault, the Logic App would either read the backend's secrets (vault 
 ## Consequences
 
 - **Changing the URL:** update tfvars, run init, then bump `value_wo_version` in `teams-alerts.tf`. "Terraform has no way of knowing if a write-only argument value has changed", so without the bump CI does nothing.
-- **No grouping.** Each alert becomes its own card. Action groups don't group, and Grafana's notification policies aren't in this path (0031).
+- **No grouping in this path.** Each alert becomes its own card. Action groups don't group, and Grafana's notification policies aren't in this path (0031). Prometheus alerts are now grouped by a second workflow (0034); other alert types still get one card each.
+  - Seen for real after a node restart (0033): 63 alerts gave 63 Fired and 63 Resolved cards, each batch sent by the Logic App within ~4 s.
+  - The Logic App sent nothing after 10:28:50, yet cards kept arriving until ~10:45.
+- **Teams posts asynchronously, at its own pace.**
+  - The webhook answers `202 Accepted` with `x-ms-workflow-run-id` and `x-ms-workflow-system-id: /locations/southeastasia/…`. The Teams side is itself a workflow (Power Automate): it queues the request and posts the card later.
+  - The Teams connector throttles "Post an Adaptive Card as Flow bot, and any other Flow bot operations" to **25 calls per 300 seconds**, about 5 cards a minute. A batch of 63 then takes ~13 minutes to drain, which matches what was seen.
+  - Not checked: that the "Send webhook alerts to a channel" template posts as Flow bot. The Teams workflow's run history would show it.
+  - So a real incident behind a burst of noise can show up many minutes late. The fix is fewer cards, not faster sending.
 - **The Teams workflow belongs to people,** not to the team. Without a co-owner it can be orphaned and stop posting.
 - **Verified** (2026-11-22):
   - CI run 45003455703 created the resources: `Apply complete! Resources: 14 added, 0 changed, 0 destroyed.` (with the 0033 rules).
