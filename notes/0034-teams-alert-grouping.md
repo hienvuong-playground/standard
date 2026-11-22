@@ -78,12 +78,15 @@ Everything is in `infra/cloud/teams-alerts.tf`.
   - "Consumption Built-in Actions" in westeurope: first 4,000 free, then $0.000025 each (Azure Retail Prices API).
   - The trigger at one run per minute is at most ~43,200 runs a month, about $1, if empty minutes are billed.
   - A card for 50 alerts is roughly 700 actions, about $0.02.
-- **Not verified yet** (check in run history on the first cluster start after deploy):
-  - Whether empty minutes are billed. The trigger history shows one check per minute with `Fired: False` and no run while the batch is empty (14:28 and 14:29 UTC, 2026-11-22).
-  - That `xpath()` returns plain strings for `name()` and `string()`.
-  - That `union()` of the keys with itself removes duplicates within one array (the doc example only shows duplicates across two arrays).
-  - That an If with a false condition reports Succeeded.
-  - The exact newlines Teams renders.
+- **Verified** (2026-11-22) by re-posting the 76 real Fired payloads from 21:47 (Vietnam time) to the `alert` trigger's callback URL:
+  - All 76 sender runs went through `send-to-batch`. One batch run at 22:37:27 held all 76 items, so `union()` of the keys with itself left one group.
+  - `xpath()` returned plain strings for `name()` and `string()`.
+  - Title `[FIRING:76] KubePodContainerRestart aks-playground (warning)`. The text had 50 alerts and `… 26 alerts truncated`, 19,974 bytes. `post-to-teams` got `202 Accepted`.
+  - The first attempt failed at `labels-count`: `xml()` parses a *string* as XML ("Data at the root level is invalid"). It needs `xml(json(...))`, as in the docs' Example 2.
+- **Not verified yet:**
+  - Whether empty minutes are billed. The trigger history shows one check per minute with `Fired: False` and no run while the batch is empty.
+  - That an If with a false condition reports Succeeded, which the single-card path depends on. It runs after any status anyway.
+  - How Teams renders the newlines and `#`.
 
 ## References
 
