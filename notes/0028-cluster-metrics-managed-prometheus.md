@@ -76,11 +76,10 @@ Rejected:
 
 ## Not done yet: alerts
 
-No alert rules exist yet. The plan is to alert in Grafana. Use Microsoft's recommended Kubernetes alerts as the list of *what* to alert on (https://learn.microsoft.com/en-us/azure/azure-monitor/containers/kubernetes-metric-alerts):
+No alert rules exist yet. Alerts are evaluated in Azure Monitor, not Grafana ([0031](0031-alerting-in-azure-monitor.md)). Use Microsoft's recommended Kubernetes alerts as the list of *what* to alert on (https://learn.microsoft.com/en-us/azure/azure-monitor/containers/kubernetes-metric-alerts):
 
 - Prometheus rules "organized by pod, cluster, and node level": 11 cluster, 2 node and 16 pod rules, each with a description. There are also 2 platform metric rules.
-- The PromQL for each rule is in the page's ARM template (https://aka.ms/azureprometheus-recommendedmetricalerts). It can be reused in Grafana alert rules against the AMW datasource.
-- The page's deployment parts (portal, ARM, Bicep, action group) don't apply. They create alert rules that Azure Monitor evaluates and that notify through an action group. Grafana alert rules notify through Grafana contact points instead.
+- The PromQL for each rule is in the page's ARM template (https://aka.ms/azureprometheus-recommendedmetricalerts). It maps to Prometheus rule groups that notify through an action group.
 
 ## References
 

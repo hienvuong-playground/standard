@@ -9,7 +9,7 @@ The goal of 0015 is to delete the whole environment and bring it back without ha
 Everything needed is either in code or in the steps below. Anything not listed is in code.
 
 **`infra/init/bootstrap.sh`** does what has to happen before init can run. It is idempotent and fails before creating anything if a right is missing:
-1. **Preflight**, reporting every problem at once: `Owner` on the subscription; `Global Administrator` in Entra (via Graph `transitiveMemberOf`, so a role through a group counts; a PIM-eligible role must be activated first); `init/secrets.auto.tfvars` has `github_token` and `github_app_pem`; the PAT has scopes `admin:org` and `repo`; the PAT owner is admin of the org; the Cloudflare token is active, can list permission groups (Account API Tokens) and can read the `hienvuong.com` zone (DNS and Zone Settings Edit can't be checked without writing). Also prints the subscription, so a wrong `az login` is visible.
+1. **Preflight**, reporting every problem at once: `Owner` on the subscription; `Global Administrator` in Entra (via Graph `transitiveMemberOf`, so a role through a group counts; a PIM-eligible role must be activated first); `init/secrets.auto.tfvars` has `github_token`, `github_app_pem` and `teams_alerts_webhook_url`; the PAT has scopes `admin:org` and `repo`; the PAT owner is admin of the org; the Cloudflare token is active, can list permission groups (Account API Tokens) and can read the `hienvuong.com` zone (DNS and Zone Settings Edit can't be checked without writing). Also prints the subscription, so a wrong `az login` is visible.
 2. **Registers the Azure resource providers.** azurerm 5.x registers none by default (`resource_provider_registrations = "none"`), and a new subscription has only a few registered, so the first apply would fail halfway. The list is derived from the resource types in `infra/init`, `infra/cloud`, `infra/k8s/terraform`; Flux on AKS needs `Microsoft.Kubernetes` + `Microsoft.KubernetesConfiguration`. Adding a resource of a new kind = add its namespace to the script.
 3. **Creates the storage account for init's own state** (why it's outside Terraform: 0015) in `rg-playground-init-state`, names read from `infra/terraform-backend/init.tfbackend`. Shared keys off, blob versioning on. Grants the runner `Storage Blob Data Contributor` on it (`Owner` has no blob data-plane rights; the backend uses Entra auth) and retries until the role has propagated.
 
@@ -22,11 +22,12 @@ Rejected for the script: the GitHub Actions PR setting (Terraform has resources 
 3. **GitHub manual pieces.**
    - Classic PAT with `admin:org` and `repo`.
    - GitHub App + PEM (permissions and installation in 0003). Put its App ID and installation ID in `infra/k8s/terraform/providers.tf`.
-4. **`infra/init/secrets.auto.tfvars`** with `github_token`, `github_app_pem` and `cloudflare_api_token`. The PEM is multi-line, so use a heredoc:
+4. **`infra/init/secrets.auto.tfvars`** with `github_token`, `github_app_pem`, `cloudflare_api_token` and `teams_alerts_webhook_url`. The Teams URL comes from a Workflows webhook made by hand in the alerts channel ("Send webhook alerts to a channel", add a co-owner; 0031). It survives a rebuild, since Teams isn't torn down. The PEM is multi-line, so use a heredoc:
    ```
-   github_token         = "..."
-   cloudflare_api_token = "..."
-   github_app_pem       = <<EOT
+   github_token             = "..."
+   cloudflare_api_token     = "..."
+   teams_alerts_webhook_url = "https://..."
+   github_app_pem           = <<EOT
    -----BEGIN RSA PRIVATE KEY-----
    ...
    -----END RSA PRIVATE KEY-----
