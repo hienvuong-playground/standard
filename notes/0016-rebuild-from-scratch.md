@@ -22,7 +22,7 @@ Rejected for the script: the GitHub Actions PR setting (Terraform has resources 
 3. **GitHub manual pieces.**
    - Classic PAT with `admin:org` and `repo`.
    - GitHub App + PEM (permissions and installation in 0003). Put its App ID and installation ID in `infra/k8s/terraform/providers.tf`.
-4. **`infra/init/secrets.auto.tfvars`** with `github_token`, `github_app_pem`, `cloudflare_api_token` and `teams_alerts_webhook_url`. The Teams URL comes from a Workflows webhook made by hand in the alerts channel ("Send webhook alerts to a channel", add a co-owner; 0031). It survives a rebuild, since Teams isn't torn down. The PEM is multi-line, so use a heredoc:
+4. **`infra/init/secrets.auto.tfvars`** with `github_token`, `github_app_pem`, `cloudflare_api_token` and `teams_alerts_webhook_url`. The Teams URL comes from a Workflows webhook made by hand in the alerts channel ("Send webhook alerts to a channel", add a co-owner; 0032). It survives a rebuild, since Teams isn't torn down. The PEM is multi-line, so use a heredoc:
    ```
    github_token             = "..."
    cloudflare_api_token     = "..."
