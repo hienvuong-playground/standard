@@ -30,7 +30,8 @@ Everything is in `infra/cloud/teams-alerts.tf`.
 **Routing, in the existing workflow** (`logic-playground-teams-alerts`):
 
 - Action `is-prometheus` checks `essentials.monitoringService == 'Prometheus'`. Azure sets this field per rule type. Values seen: `Prometheus`, `Platform` (metric alert), `ServiceHealth`.
-- If true: `SendToBatch` sends the alert's `data` to the batch workflow, with partition `alertname|cluster`, then `Terminate` (Succeeded) ends the run.
+- If true: `SendToBatch` sends the alert's `data` to the batch workflow, then `Terminate` (Succeeded) ends the run.
+  - No partition name. It's optional (`partitionName?` in LogicAppsUX), and the receiver groups by alert content anyway. The first deploy used `alertname|cluster` and every send failed: "InvalidBatchPartitionName… The name can only be a letter, digit, or any of the following symbols: '-', '_', '.', '(', ')'". Those alerts fell back to single cards (2026-11-22, 14:47 UTC).
 - Otherwise, the single-card path runs unchanged (0032). It runs after any status of `is-prometheus`, because the If action's status for a false condition isn't documented. A failed `send-to-batch` therefore also falls back to a single card.
 - Why only Prometheus: the template is built on labels. Metric alerts and Service Health alerts have no `alertContext.labels`.
 
@@ -41,7 +42,7 @@ Everything is in `infra/cloud/teams-alerts.tf`.
   - `BatchTriggerInputs` and `SendToBatchActionInputs` in the LogicAppsUX designer source.
   - A Consumption workflow in Azure-Sentinel (Group-IB playbooks) that uses both, with no integration account. Items are read as `triggerBody()['items']` → `item()['content']`.
 - The batch configuration name is `TeamsAlerts`. Azure rejected `teams-alerts` on apply: "The name can only be a letter or digit." The Batch doc doesn't mention this.
-- One card per distinct `alertname|cluster` in the released items, so it works whether a release holds one partition or several.
+- One card per distinct `alertname|cluster` in the released items. Without partitions, one release holds every alert of that minute.
 
 **The card follows Alertmanager's msteamsv2 notifier:**
 
@@ -78,7 +79,6 @@ Everything is in `infra/cloud/teams-alerts.tf`.
   - The trigger at one run per minute is at most ~43,200 runs a month, about $1, if empty minutes are billed.
   - A card for 50 alerts is roughly 700 actions, about $0.02.
 - **Not verified yet** (check in run history on the first cluster start after deploy):
-  - Whether one release holds one partition or several.
   - Whether empty minutes are billed. The trigger history shows one check per minute with `Fired: False` and no run while the batch is empty (14:28 and 14:29 UTC, 2026-11-22).
   - That `xpath()` returns plain strings for `name()` and `string()`.
   - That `union()` of the keys with itself removes duplicates within one array (the doc example only shows duplicates across two arrays).
