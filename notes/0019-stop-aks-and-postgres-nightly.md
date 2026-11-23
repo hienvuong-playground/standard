@@ -9,7 +9,7 @@ The playground is only used during work sessions, but AKS nodes and the Postgres
 **Stop on a schedule, start by hand.**
 
 - Stop: Azure Automation, `infra/cloud/runbook.tf` with scripts in `infra/cloud/scripts/`. One daily schedule at 02:00 Vietnam time runs two runbooks, `Stop-AKS-Cluster` and `Stop-PostgreSQL-Server`. Both skip if the resource isn't running. The Automation account's system-assigned identity has `Contributor` scoped to the cluster and to the server only, not the resource group.
-- Start: `infra/start-cloud.sh` starts both in parallel and skips whatever is already running. No start schedule, because there is no fixed start time.
+- Start: `infra/cloud.sh start` starts both in parallel and skips whatever is already running. No start schedule, because there is no fixed start time. `infra/cloud.sh stop` stops both the same way, for when work ends before 02:00.
 
 **Runtime: PowerShell 7.6 runtime environment.** The runbooks first ran on PowerShell 7.2. Azure Automation retired 7.1/7.2 on 2026-09-30. On 7.2, `Get-AzPostgreSqlFlexibleServer` was "not recognized" even though `Az.PostgreSql` 1.1.0 was listed in the account's 7.2 modules. The cause wasn't found, and it wasn't worth digging into on a retired runtime. Microsoft says to use a runtime environment with 7.6 or 7.4. 7.4 ends support 2026-11-10, so 7.6 it is (LTS until 2028-11-14). Its default Az 15.1.0 includes `Az.PostgreSql` 1.4.0, so nothing extra is imported. With runtime environments, `runbook_type` is plain `PowerShell` and matches what the API returns. That removed the old `ignore_changes = [runbook_type]` workaround.
 
@@ -24,7 +24,7 @@ Rejected:
 
 ## Consequences
 
-- **While Postgres is stopped, `terraform plan` on `infra/cloud` fails.** Refresh can't read the database or the Entra admins (`ServerStoppedError: ... is in 'Stopped' state`). Run `start-cloud.sh` before pushing infra changes. CI doesn't start the server itself (yet).
+- **While Postgres is stopped, `terraform plan` on `infra/cloud` fails.** Refresh can't read the database or the Entra admins (`ServerStoppedError: ... is in 'Stopped' state`). Run `infra/cloud.sh start` before pushing infra changes. CI doesn't start the server itself (yet).
 - Azure starts a stopped flexible server on its own after 7 days. The daily stop covers that.
 - Storage still bills while stopped. Only compute is saved.
 - The frontend is down while AKS is stopped (0011).
