@@ -38,6 +38,8 @@ The extra Azure Monitor SLA on the alert path (0031) was judged not worth this. 
 
 Rejected: keeping Azure Monitor (reasons above).
 
+**What to alert on doesn't change.** The layers from 0031 ("Where the alert list comes from") still apply: application symptoms (golden signals, later SLO burn rate) are what should page; infrastructure alerts are for diagnosis. The application alerts must include an availability test from outside (Application Insights standard test, "Testing externally visible behavior as a user would see it", SRE book). App metrics come through OTel inside the cluster and stop with it, so white-box application alerts go quiet when the cluster dies, just like the cluster rules.
+
 ## Two layers: evaluating rules vs. notifying
 
 This was the confusing part, so spelled out:
