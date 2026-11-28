@@ -2,7 +2,31 @@
 
 ## Context
 
-0031 put alerting in Azure Monitor. In practice two things hurt: Azure has no grouping (0034 rebuilt Alertmanager's grouping in a Logic App), and the Logic App workflow code is hard to read. The extra Azure Monitor SLA on the alert path (0031) was judged not worth that. Grafana's Alertmanager groups natively.
+0031 put alerting in Azure Monitor. After running it (0032–0034), Grafana came out clearly ahead:
+
+- **The UI is nicer and easier to use** than Azure's alert pages.
+- **Alert state is visible.** Grafana shows each rule and instance as Normal, Pending, Alerting, Recovering, No Data or Error. Azure showed nothing until an alert fired: during the `for` period, and during the unexplained ~14 minutes after it, "Alerts API and Resource Graph showed no Prometheus alert at all" (0033).
+  - Example from the first test (2026-11-28): one failing Job made two rules true at 08:04:30. `KubePodFailedState` (`for` 5m) fired at 08:09:30. `KubeJobStale` (`for` 6h, "Job stuck") stayed Pending. In Grafana you see which rule is waiting and since when. In Azure both would have been invisible.
+- **Faster, and the delay is explainable.** Same test as 0033 (a Job that exits 1, `KubePodFailedState`), counted from the moment the expression turned true:
+  - Azure: true at 16:25, fired 16:44:47. About 20 minutes, ~14 of them unexplained.
+  - Grafana: true (Pending) 08:04:30, firing 08:09:30, sent to Teams 08:10:00. About 5.5 minutes: the 5-minute `for` plus the 30-second `group_wait`.
+  - Every part of Grafana's delay has a name and a setting:
+
+    | Part | How long | Where it's set |
+    |---|---|---|
+    | Scrape + ingest into the AMW | not measured alone; ~3 min from restart to true expression in 0033 | — |
+    | Query offset | 1 min (value at now-1m) | import default `rule_query_offset` |
+    | Evaluation interval | up to 60 s | `interval_seconds = 60` |
+    | Pending (`for`) | per rule, 5 min to 6 h | Microsoft's rules |
+    | `group_wait` | 30 s | Grafana default |
+    | Teams posting | async, 25 cards per 300 s (0032) | Teams |
+
+  - Expected after a short node outage like 0033's (VMSS off ~4 minutes, 63 restart alerts): ~3 + 1 + 15 (`KubePodContainerRestart`'s `for`) + <1.5 ≈ 20 minutes, as one grouped card. Azure took ~32 minutes, and Teams then needed ~13 more minutes to post 63 single cards. Not measured yet with Grafana.
+  - **The nightly stop/start (0019) doesn't trigger that.** The rule uses `increase(...[1h])`. After a night off, the 1-hour window only holds samples from after the start. Checked on 2026-11-28 (start 05:50): the summed restart counter was 5 before the stop and 2 after the start, flat until 08:19. The rule's expression had 0 series > 0 since 05:50. So a start that comes up healthy gives no alerts. This is about rules that count changes over a window (`increase`). Rules that look at the current state (`KubePodCrashLooping`, `KubePodNotReadyByController`, `KubeDeploymentReplicasMismatch`, `KubePodFailedState`…) still fire after any start if something stays broken, after their `for`.
+- **Grouping is built in.** Azure action groups don't group. 0034 had to rebuild Alertmanager's grouping with Logic Apps Batch, still without per-group state, repeat or inhibition.
+- **A default message template.** Grafana sends `default.title` / `default.message` to Teams as is. Azure sends the common alert schema, so the card had to be built by hand in a Logic App (0032), and even listing labels needed an `xml()`/`xpath()` workaround because workflow expressions have no `keys()` (0034). That code is hard to read and to change.
+
+The extra Azure Monitor SLA on the alert path (0031) was judged not worth this. AMG has a 99.9% SLA of its own, though it only covers "HTTP requests to perform operations", not alert evaluation (0031).
 
 ## Decision
 
@@ -82,7 +106,15 @@ Both data sources were created by Azure and use managed identity (`msi`), which 
   - The template on `main` still matches all 30 expressions in `kubernetes-alerts.tf`.
   - The template was POSTed to Grafana's import API (`/api/convert/prometheus/config/v1/rules/convert-test`, rules paused) on AMG. The output was compared with the Terraform rules: 30/30 match on group, `for`, `keep_firing_for`, labels (minus `__converted_prometheus_rule__`), annotations, the query model, time range, math, threshold, condition, no-data/error state and missing-series setting. The only differences were `60m` vs `1h`, which the provider treats as equal. The test folder was deleted.
   - `terraform validate` for both stacks.
-- **Not verified yet:** the deploy, the contact point test, a real alert end to end.
+- **Verified after deploy (2026-11-28, CI run 46090482196):**
+  - `cloud`: "0 added, 7 changed". The three alert rule groups report `enabled=false` (the recording rule groups stay on), both metric alerts `False`, both Logic Apps `Disabled`. `grafana`: "7 added".
+  - All 33 rules `health=ok`, `inactive`, no `DatasourceNoData`. But `health=ok` doesn't mean the query works: with `exec_err_state = OK` a failing query still shows `ok`, and only the instance says `Normal (Error)` (see `KubePVUsageHigh` below).
+  - **`KubePVUsageHigh` is broken here, silently.** Every evaluation fails: "found duplicate series for the match group {cluster="aks-playground", namespace="observability"} on the right hand-side". The rule joins `on(namespace,cluster,pod,container)`, but `kubelet_volume_stats_*` in the AMW has no `pod` label, and `observability` has three PVCs. Azure ran the same expression, so it was broken there too (maybe the cause of the "Unavailable" Resource Health in 0033, not checked). The datasource-health rule doesn't catch this kind of error. Not fixed yet: needs a decision (change Microsoft's expression, or surface per-rule errors).
+  - **Nightly stop/start gives no alerts.** All 30 expressions replayed over 05:50–08:00 on 2026-11-28 (start at 05:50): 28 never true, `KubeJobStale` true for 1 minute in `kube-system` (its `for` is 6 h), `KubePVUsageHigh` errors. Evaluating the rules through `/api/v1/eval` returned real values: node CPU 7 %, memory 72.8 %, `vector(1)` = 1. `KubePodContainerRestart` returned nothing (healthy).
+  - Contact point test (`/apis/notifications.alerting.grafana.app/v1beta1/namespaces/default/receivers/<uid>/test`; the old `/api/alertmanager/grafana/config/api/v1/receivers/test` returns 410) at 08:02:25: `success`.
+  - Real alert: `kubectl create job alert-test --image=busybox:1.36 -- sh -c 'exit 1'` in a throwaway namespace. Timeline above. The instance had `alertname`, `cluster`, `controller`, `namespace`, `severity` and `grafana_folder`. Teams `lastNotifyAttempt` 08:10:00, no error. The namespace was deleted at 08:11:11. The rule went Recovering (query empty) at ~08:13:50, so `keep_firing_for` applies before the missing-series eviction. Normal at ~08:29, after the 15-minute `keep_firing_for`. Resolved notification at 08:30:00.
+  - AMG runs two servers, and each keeps its own notification status. `lastNotifyAttempt` on `/api/alertmanager/grafana/config/api/v1/receivers` therefore shows the real time or `0001-01-01` depending on which server answers.
+  - kubectl: `kubelogin --login azurecli` picks the az default tenant (WORK) and gets `Unauthorized`. Workaround: `az account get-access-token --subscription Playground --resource 6dae42f8-4368-4678-94ff-3960e28e3630` and `kubectl --token`.
 
 ## References
 
