@@ -2,6 +2,8 @@
 
 ## Context
 
+**Disabled since 0035** (alerting moved to Grafana). Kept as reference.
+
 After a node restart, 63 `KubePodContainerRestart` alerts gave 63 Fired and 63 Resolved cards (0033). Teams then took ~13 minutes to post them (0032). These weren't duplicates: each was a different series ("No duplicates", 0033). Azure already deduplicates: stateful alerts "will not fire again or trigger any more actions until the conditions are resolved" (alerts overview). What's missing is **grouping**: many different alerts with one cause in one notification.
 
 Constraints: the rule stays (Microsoft's recommended set, 0033), and Teams stays the channel (0032).

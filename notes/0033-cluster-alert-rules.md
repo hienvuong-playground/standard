@@ -2,6 +2,8 @@
 
 ## Context
 
+**Disabled since 0035** (alerting moved to Grafana). Kept as reference.
+
 The first alerts to set up (0031). For the cluster layer, Microsoft publishes a recommended set on the Kubernetes metric alerts page. That's Prometheus rules "organized by pod, cluster, and node level", plus 2 platform metric rules. Using it avoids inventing thresholds.
 
 ## How it works

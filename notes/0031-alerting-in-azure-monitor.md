@@ -2,6 +2,8 @@
 
 ## Context
 
+**Superseded by 0035:** alerting moved to Grafana. The Azure Monitor rules are disabled and kept as reference.
+
 No alert rules exist yet. 0028 planned to alert in Grafana (AMG, 0021), mainly to avoid vendor lock-in. Before building anything, the two options were compared on lock-in, availability and notification features.
 
 ## Decision

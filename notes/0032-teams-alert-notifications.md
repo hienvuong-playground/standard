@@ -2,6 +2,8 @@
 
 ## Context
 
+**Disabled since 0035** (alerting moved to Grafana). Kept as reference.
+
 Alerts are evaluated in Azure Monitor (0031), and they need to reach people. The playground stands in for a real project, so the channel follows the real-project rule: severity decides the channel. "Pages and tickets are the only valid ways to get a human to take action" (SRE workbook). "Email alerts are of very limited value and tend to easily become overrun with noise" (SRE book). Non-urgent alerts go to a Teams channel the team watches. Paging (on-call) isn't set up yet.
 
 ## How it works
