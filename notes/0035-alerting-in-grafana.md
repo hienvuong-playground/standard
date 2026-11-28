@@ -68,7 +68,7 @@ The AMW has no Ruler API (Microsoft only documents rule groups as Azure resource
 - `for` and `keep_firing_for` are copied (Azure's `timeToResolve`: "resolve alerts if the rule condition is no longer true during the Time to auto-resolve period"). `missing_series_evals_to_resolve = 1`, as in the import.
 - `$value` in the annotations still means the query value: "If there's exactly one datasource node, use its numeric value… compatible with Prometheus templating" (`pkg/services/ngalert/state/template/template.go`, 13.2.4).
 - **Time range 660s→60s.** The values count back from the evaluation time. An instant query "evaluates the expression once, at the end of the selected time range", so only `to` matters: the rule asks for the value at now-1m ("an offset of `1m` adjusts the query's time range to `To: now-1m`"). `from` has no effect. 660 = the import's 600s default + offset, kept so the rule matches the import. Ranges inside the PromQL (`[1h]`) count back from that point.
-- **If the newest samples aren't ingested yet:** an instant query takes "the newest sample that is less than the lookback period ago" (5 minutes), so it uses a slightly older sample, not nothing. Only after more than 5 minutes without data do the series disappear. Then rules are Normal, and firing alerts resolve (`missing_series_evals_to_resolve = 1`), as in Prometheus. That's a broken metrics pipeline, which these rules (and the unreachable rule) don't detect. The real AMW ingestion delay hasn't been measured.
+- **If the newest samples aren't ingested yet:** an instant query takes "the newest sample that is less than the lookback period ago" (5 minutes), so it uses a slightly older sample, not nothing. Only after more than 5 minutes without data do the series disappear. Then rules are Normal, and firing alerts resolve (`missing_series_evals_to_resolve = 1`), as in Prometheus. That's a broken metrics pipeline, which these rules don't detect (the AMW still answers queries, so there's no error either). The real AMW ingestion delay hasn't been measured.
 
 **No Data = OK.** For these rules an empty result means healthy: the query only returns series that are in trouble. Grafana's default No Data handling assumes the opposite (the query returns numbers when healthy, so empty = broken) and would create a `DatasourceNoData` alert. Here "healthy" and "no data at all" look the same, so No Data can't tell them apart.
 
@@ -76,7 +76,14 @@ The AMW has no Ruler API (Microsoft only documents rule groups as Azure resource
 - Grafana-style rules with the default No Data are the right choice for rules written here from scratch (e.g. application golden signals), where the query always returns data when healthy.
 - So these rules don't detect "the cluster is gone". That needs its own rule, not added yet.
 
-**Query errors: OK on the 30 rules, one dedicated rule.** Grafana's connectivity-errors guide: "A single data source error can lead to multiple alerts firing simultaneously", so "Create a separate alert rule dedicated to detecting when the data source itself is unreachable". `AzureMonitorWorkspaceUnreachable` queries `vector(1)` with error and no-data handling set to Alerting, `for = 5m`.
+**Query errors: Error (Grafana's default), not OK.** A failing query makes a `DatasourceError` alert with `rulename`, `datasource_uid`, `ref_id` and the error text in the `Error` annotation.
+
+- First version followed Grafana's connectivity-errors guide: OK on the rules plus one dedicated rule (`AzureMonitorWorkspaceUnreachable`, `vector(1)`, errors → Alerting). The guide says to "decide it per rule, based on whether that rule already has a dedicated connectivity alert covering it". Its premise is that query errors come from the data source (timeouts, unreachable). It doesn't cover a rule whose own query is wrong.
+- `KubePVUsageHigh` showed exactly that case (below): the AMW was fine, the health rule was green, and the rule failed on every evaluation without anyone being told.
+- With Error on every rule, the dedicated rule adds nothing and was removed. If the AMW is down, every rule errors. Several rules have `for` 5m ("The Error state honors the pending period"), so `DatasourceError` arrives as fast as the health rule did. `DatasourceError` has no `cluster` label, so with `group_by = [alertname, cluster]` all of them come as one card.
+- Short glitches stay quiet: Error needs "repeated failures (default: `3`)" and then the rule's `for`.
+- Grafana's meta-monitoring page suggests alerting on `grafana_alerting_alerts{state="error"} > 0`. That needs Grafana's own metrics, which AMG probably doesn't expose (not checked).
+- Tested 2026-11-28 with a throwaway rule using `KubePVUsageHigh`'s old query, `for` 0, interval 10s: created 08:44:21, Error and `DatasourceError` at 08:44:30, sent to Teams 08:45:02. The rule's `health` shows `error` too (with OK it showed `ok`). Rule and folder deleted.
 
 **2 platform metric rules (Platform group):** node CPU > 95 % and memory working set > 100 %. They're part of Microsoft's recommended set (0033), but they're Azure platform metrics of the AKS resource, not Prometheus data, so they go through the Azure Monitor data source. Query with `PT1M` grain over the last 5 minutes (here `from = 300` does matter) → Reduce mean (drop non-numeric) → threshold. That matches AMBA's "Average over PT5M", every 5 minutes. No Data = OK (AKS stopped). Errors = Error: with two rules a `DatasourceError` per rule is fine. Subscription, resource group and cluster name come from `cloud` outputs (`subscription_id`, `resource_group_name`, `aks_cluster_name`).
 
@@ -91,10 +98,26 @@ Both data sources were created by Azure and use managed identity (`msi`), which 
   - The platform rules (Azure Monitor) and `DatasourceError`/`DatasourceNoData` have no `cluster` label. They group by `alertname` only. Timers are Grafana's defaults (30s / 5m / 4h). This replaces the Logic App batch and adds what it lacked: per-group state, `group_wait` from the first alert, repeat.
 - **The webhook URL is in `grafana.tfstate`.** The contact point's `url` is `Sensitive`, not write-only, so an ephemeral variable can't be used. Accepted. CI passes `TEAMS_ALERTS_WEBHOOK_URL` to the `terraform-grafana` job (`infra/.github/workflows/deploy.yml`).
 
+## KubePVUsageHigh: Microsoft's expression is wrong
+
+```
+avg by (namespace, controller, container, cluster)(((kubelet_volume_stats_used_bytes{job="kubelet"} / on(namespace,cluster,pod,container) group_left kubelet_volume_stats_capacity_bytes{job="kubelet"}) * on(namespace, pod, cluster) group_left(controller) label_replace(kube_pod_owner, "controller", "$1", "owner_name", "(.*)"))) > .8
+```
+
+- It joins on `pod` (and `container`), but `kubelet_volume_stats_*` only have `namespace` and `persistentvolumeclaim` (Kubernetes metrics reference). Microsoft's own default `kubelet` scrape config only adds `metrics_path`, `instance` and `kubernetes_io_os` (`otelcollector/shared/configmap/mp/testdata/default-linux-ds.yaml`). The AMW series have no `pod` label (checked).
+- Result, checked on the AMW:
+  - A namespace with one PVC: the first join works (0.0002). The full expression **without** `> .8` is empty, because the second join compares `pod=""` with `kube_pod_owner`'s real pod names.
+  - A namespace with 2+ PVCs (`observability` has three): "many-to-many matching not allowed".
+  - So it's empty or an error, never a series. Even a full PV wouldn't alert. The description uses `{{ $labels.pod }}`, which never exists.
+- Same expression everywhere Microsoft publishes it: the deployed Azure rule group (`az resource show … KubernetesAlert-RecommendedMetricAlertsaks-playground-Pod-level`), `GeneratedMonitoringArtifacts/Default/recommendedMetricAlerts.json` (target of `aka.ms/azureprometheus-recommendedmetricalerts`), `AddonBicepTemplate/recommendedMetricAlerts.bicep:603`. The Azure portal's rule editor shows the same "many-to-many matching" error on the Azure rule.
+- Why nobody notices: in Azure a failing rule is silent (at most Resource Health "Unavailable… unknown reason", as seen in 0033). Microsoft's e2e test has the `kubelet_volume_stats_*` metrics commented out (`otelcollector/test/ginkgo-e2e/querymetrics/query_metrics_test.go`). The upstream mixin in the same repo joins on `(namespace, persistentvolumeclaim)`.
+- **Fix here:** `kubelet_volume_stats_used_bytes{job="kubelet"} / kubelet_volume_stats_capacity_bytes{job="kubelet"} > .8`, per PVC, with the description using `persistentvolumeclaim` and `namespace`. Both metrics have the same labels, so they divide one to one. Without the threshold it returned the three PVCs (1.1 %, 0.02 %, 0.02 %). `for` 15m and the 80 % threshold are Microsoft's.
+- Not checked: whether the portal's "enable recommended alerts" toggle uses this same template.
+
 ## Consequences
 
 - **Microsoft doesn't support it:** "Using Grafana alerts with an Azure Monitor service isn't officially supported by Microsoft." That's a support statement, not a technical limit.
-- **Alert rules "share the same compute resources and query-throttling limits with dashboard rendering"** in AMG. The X1 limit is 500 rules. We use 33.
+- **Alert rules "share the same compute resources and query-throttling limits with dashboard rendering"** in AMG. The X1 limit is 500 rules. We use 32.
 - **If AMG itself is down, nothing alerts and nobody is told.** Not covered yet.
 - **Rules provisioned by Terraform can't be edited in the UI.** Same as dashboards (0026).
 - **Every rule in AMG goes to Teams through the default policy,** including rules made by hand in the UI.
@@ -104,13 +127,13 @@ Both data sources were created by Azure and use managed identity (`msi`), which 
   - Derive the uid from the AMW name. Rejected: it still relies on the undocumented naming.
 - **Verified before deploy (2026-11-28):**
   - The template on `main` still matches all 30 expressions in `kubernetes-alerts.tf`.
-  - The template was POSTed to Grafana's import API (`/api/convert/prometheus/config/v1/rules/convert-test`, rules paused) on AMG. The output was compared with the Terraform rules: 30/30 match on group, `for`, `keep_firing_for`, labels (minus `__converted_prometheus_rule__`), annotations, the query model, time range, math, threshold, condition, no-data/error state and missing-series setting. The only differences were `60m` vs `1h`, which the provider treats as equal. The test folder was deleted.
+  - The template was POSTed to Grafana's import API (`/api/convert/prometheus/config/v1/rules/convert-test`, rules paused) on AMG. The output was compared with the Terraform rules: 30/30 match on group, `for`, `keep_firing_for`, labels (minus `__converted_prometheus_rule__`), annotations, the query model, time range, math, threshold, condition, no-data/error state and missing-series setting. The only differences were `60m` vs `1h`, which the provider treats as equal. The test folder was deleted. Changed on purpose afterwards: `exec_err_state` (Error, not OK) and `KubePVUsageHigh`'s expression.
   - `terraform validate` for both stacks.
 - **Verified after deploy (2026-11-28, CI run 46090482196):**
   - `cloud`: "0 added, 7 changed". The three alert rule groups report `enabled=false` (the recording rule groups stay on), both metric alerts `False`, both Logic Apps `Disabled`. `grafana`: "7 added".
-  - All 33 rules `health=ok`, `inactive`, no `DatasourceNoData`. But `health=ok` doesn't mean the query works: with `exec_err_state = OK` a failing query still shows `ok`, and only the instance says `Normal (Error)` (see `KubePVUsageHigh` below).
-  - **`KubePVUsageHigh` is broken here, silently.** Every evaluation fails: "found duplicate series for the match group {cluster="aks-playground", namespace="observability"} on the right hand-side". The rule joins `on(namespace,cluster,pod,container)`, but `kubelet_volume_stats_*` in the AMW has no `pod` label, and `observability` has three PVCs. Azure ran the same expression, so it was broken there too (maybe the cause of the "Unavailable" Resource Health in 0033, not checked). The datasource-health rule doesn't catch this kind of error. Not fixed yet: needs a decision (change Microsoft's expression, or surface per-rule errors).
-  - **Nightly stop/start gives no alerts.** All 30 expressions replayed over 05:50–08:00 on 2026-11-28 (start at 05:50): 28 never true, `KubeJobStale` true for 1 minute in `kube-system` (its `for` is 6 h), `KubePVUsageHigh` errors. Evaluating the rules through `/api/v1/eval` returned real values: node CPU 7 %, memory 72.8 %, `vector(1)` = 1. `KubePodContainerRestart` returned nothing (healthy).
+  - All 33 rules (then incl. the health rule) `health=ok`, `inactive`, no `DatasourceNoData`. But with `exec_err_state = OK` a failing query still shows `ok`, and only the instance says `Normal (Error)` (see `KubePVUsageHigh` below). Evaluating the rules through `/api/v1/eval` returned real values: node CPU 7 %, memory 72.8 %, `vector(1)` = 1. `KubePodContainerRestart` returned nothing (healthy).
+  - **Microsoft's `KubePVUsageHigh` can never fire, on any cluster with Azure Managed Prometheus.** Fixed here, see "KubePVUsageHigh" below.
+  - **Nightly stop/start gives no alerts.** All 30 expressions replayed over 05:50–08:00 on 2026-11-28 (start at 05:50): 28 never true, `KubeJobStale` true for 1 minute in `kube-system` (its `for` is 6 h), `KubePVUsageHigh` errors.
   - Contact point test (`/apis/notifications.alerting.grafana.app/v1beta1/namespaces/default/receivers/<uid>/test`; the old `/api/alertmanager/grafana/config/api/v1/receivers/test` returns 410) at 08:02:25: `success`.
   - Real alert: `kubectl create job alert-test --image=busybox:1.36 -- sh -c 'exit 1'` in a throwaway namespace. Timeline above. The instance had `alertname`, `cluster`, `controller`, `namespace`, `severity` and `grafana_folder`. Teams `lastNotifyAttempt` 08:10:00, no error. The namespace was deleted at 08:11:11. The rule went Recovering (query empty) at ~08:13:50, so `keep_firing_for` applies before the missing-series eviction. Normal at ~08:29, after the 15-minute `keep_firing_for`. Resolved notification at 08:30:00.
   - AMG runs two servers, and each keeps its own notification status. `lastNotifyAttempt` on `/api/alertmanager/grafana/config/api/v1/receivers` therefore shows the real time or `0001-01-01` depending on which server answers.
@@ -144,3 +167,14 @@ Both data sources were created by Azure and use managed identity (`msi`), which 
 - https://learn.microsoft.com/en-us/azure/azure-monitor/metrics/prometheus-rule-groups
 - https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-pricing
 - https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
+- https://prometheus.io/docs/prometheus/latest/querying/basics/#staleness
+- https://prometheus.io/docs/prometheus/latest/querying/functions/#increase
+- https://grafana.com/docs/grafana/latest/alerting/fundamentals/alert-rules/annotation-label/
+- https://grafana.com/docs/grafana/latest/alerting/monitor/
+- https://grafana.com/docs/grafana/latest/datasources/prometheus/query-editor/
+- https://learn.microsoft.com/en-us/azure/azure-monitor/containers/prometheus-metrics-scrape-configuration
+- https://kubernetes.io/docs/reference/instrumentation/metrics/
+- https://github.com/Azure/prometheus-collector/blob/main/GeneratedMonitoringArtifacts/Default/recommendedMetricAlerts.json
+- https://github.com/Azure/prometheus-collector/blob/main/AddonBicepTemplate/recommendedMetricAlerts.bicep
+- https://github.com/Azure/prometheus-collector/blob/main/otelcollector/shared/configmap/mp/testdata/default-linux-ds.yaml
+- https://github.com/Azure/prometheus-collector/blob/main/mixins/kubernetes/alerts/storage_alerts.libsonnet
